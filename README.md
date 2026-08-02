@@ -51,6 +51,11 @@ Explicit processor-path configuration is required for predictable builds and
 for javac on JDK 23 and later. Until the artifacts are published, run
 `./mvnw install` in this repository before compiling a separate Maven client.
 
+For contributors, `./mvnw verify` also builds the isolated Maven client under
+`reduction-store-processor/src/it`. The fixture validates processor discovery,
+generated-source compilation, and runtime use through the published artifact
+shape rather than the processor test harness.
+
 ## Example
 
 Given top-level types in package `example`:
