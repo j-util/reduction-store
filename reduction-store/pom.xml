@@ -10,7 +10,7 @@
 
     <name>Reduction Store</name>
     <description>Runtime contract for compile-time-generated reduction stores.</description>
-    <url>https://github.com/j-util/reductions-store</url>
+    <url>https://github.com/j-util/reduction-store</url>
 
     <organization>
         <name>j-util</name>
@@ -40,7 +40,7 @@
     <scm>
         <connection>scm:git:https://github.com/j-util/reductions-store.git</connection>
         <developerConnection>scm:git:ssh://git@github.com/j-util/reductions-store.git</developerConnection>
-        <url>https://github.com/j-util/reductions-store</url>
+        <url>https://github.com/j-util/reduction-store</url>
         <tag>HEAD</tag>
     </scm>
 

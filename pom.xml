@@ -11,7 +11,7 @@
 
     <name>Reduction Store Build</name>
     <description>Build aggregator for Reduction Store.</description>
-    <url>https://github.com/j-util/reductions-store</url>
+    <url>https://github.com/j-util/reduction-store</url>
 
     <modules>
         <module>reduction-store</module>
