@@ -53,6 +53,16 @@ class ReductionProcessorValidationTest {
     }
 
     @Test
+    void rejectsJavaKeywordAccessor(@TempDir Path temporaryDirectory)
+            throws Exception {
+        assertRejected(
+                temporaryDirectory,
+                "invalid.Row",
+                javaKeywordAccessorSource(),
+                "Reduction class name produces an invalid accessor: class()");
+    }
+
+    @Test
     void rejectsInaccessibleNoArgConstructor(
             @TempDir Path temporaryDirectory) throws Exception {
         assertRejected(
@@ -265,6 +275,21 @@ class ReductionProcessorValidationTest {
                 "    public IntReducer<Row> reducer() {",
                 "      return (state, row) -> state;",
                 "    }",
+                "  }",
+                "}");
+    }
+
+    private static String javaKeywordAccessorSource() {
+        return lines(
+                "package invalid;",
+                "import io.github.jutil.reductionstore.LongReducer;",
+                "import io.github.jutil.reductionstore.LongReduction;",
+                "import java.util.function.LongSupplier;",
+                "public final class Row {}",
+                "final class Class implements LongReduction<Row> {",
+                "  public LongSupplier supplier() { return () -> 0L; }",
+                "  public LongReducer<Row> reducer() {",
+                "    return (state, row) -> state + 1L;",
                 "  }",
                 "}");
     }
