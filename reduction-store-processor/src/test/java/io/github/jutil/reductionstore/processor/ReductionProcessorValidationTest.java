@@ -82,6 +82,90 @@ class ReductionProcessorValidationTest {
                 "Reduction input type must be top-level");
     }
 
+    @Test
+    void rejectsGenericInputType(@TempDir Path temporaryDirectory)
+            throws Exception {
+        assertRejected(
+                temporaryDirectory,
+                "invalid.Row",
+                genericInputSource(),
+                "Reduction input type must be non-generic");
+    }
+
+    @Test
+    void rejectsInputOutsideCurrentCompilation(
+            @TempDir Path temporaryDirectory) throws Exception {
+        assertRejected(
+                temporaryDirectory,
+                "invalid.Count",
+                classpathInputSource(),
+                "Reduction input type must be compiled in the same full "
+                        + "javac invocation");
+    }
+
+    @Test
+    void rejectsNonStaticMemberImplementation(
+            @TempDir Path temporaryDirectory) throws Exception {
+        assertRejected(
+                temporaryDirectory,
+                "invalid.Row",
+                nonStaticMemberSource(),
+                "Member reduction implementation classes must be static");
+    }
+
+    @Test
+    void rejectsCheckedNoArgConstructor(
+            @TempDir Path temporaryDirectory) throws Exception {
+        assertRejected(
+                temporaryDirectory,
+                "invalid.Row",
+                checkedConstructorSource(),
+                "Reduction no-argument constructor must not declare checked "
+                        + "exceptions");
+    }
+
+    @Test
+    void rejectsImplementationInaccessibleFromGeneratedPackage(
+            @TempDir Path temporaryDirectory) throws Exception {
+        CompilerTestSupport.Compilation compilation = compile(
+                temporaryDirectory,
+                sources(
+                        "model.Row", modelRowSource(),
+                        "implementation.Count",
+                        inaccessibleImplementationSource()));
+
+        assertRejected(
+                compilation,
+                "Reduction implementation is not accessible from generated "
+                        + "package model");
+    }
+
+    @Test
+    void rejectsStateTypeInaccessibleFromGeneratedPackage(
+            @TempDir Path temporaryDirectory) throws Exception {
+        CompilerTestSupport.Compilation compilation = compile(
+                temporaryDirectory,
+                sources(
+                        "model.Row", modelRowSource(),
+                        "implementation.Count", inaccessibleStateSource()));
+
+        assertRejected(
+                compilation,
+                "Reduction state type is not accessible from generated "
+                        + "package model");
+    }
+
+    @Test
+    void rejectsAccessorThatConflictsWithObject(
+            @TempDir Path temporaryDirectory) throws Exception {
+        assertRejected(
+                temporaryDirectory,
+                "invalid.Row",
+                objectMethodConflictSource(),
+                "Reduction accessor toString() conflicts with "
+                        + "java.lang.Object");
+    }
+
     private static void assertRejected(
             Path temporaryDirectory,
             String sourceName,
@@ -90,6 +174,13 @@ class ReductionProcessorValidationTest {
         CompilerTestSupport.Compilation compilation = compile(
                 temporaryDirectory,
                 sources(sourceName, source));
+
+        assertRejected(compilation, expectedDiagnostic);
+    }
+
+    private static void assertRejected(
+            CompilerTestSupport.Compilation compilation,
+            String expectedDiagnostic) throws Exception {
 
         assertFalse(compilation.succeeded(),
                 "Compilation unexpectedly succeeded");
@@ -221,6 +312,124 @@ class ReductionProcessorValidationTest {
                 "final class Count implements LongReduction<Outer.Row> {",
                 "  public LongSupplier supplier() { return () -> 0L; }",
                 "  public LongReducer<Outer.Row> reducer() {",
+                "    return (state, row) -> state + 1L;",
+                "  }",
+                "}");
+    }
+
+    private static String genericInputSource() {
+        return lines(
+                "package invalid;",
+                "import io.github.jutil.reductionstore.LongReducer;",
+                "import io.github.jutil.reductionstore.LongReduction;",
+                "import java.util.function.LongSupplier;",
+                "public final class Row<T> {}",
+                "final class Count implements LongReduction<Row<String>> {",
+                "  public LongSupplier supplier() { return () -> 0L; }",
+                "  public LongReducer<Row<String>> reducer() {",
+                "    return (state, row) -> state + 1L;",
+                "  }",
+                "}");
+    }
+
+    private static String classpathInputSource() {
+        return lines(
+                "package invalid;",
+                "import io.github.jutil.reductionstore.LongReducer;",
+                "import io.github.jutil.reductionstore.LongReduction;",
+                "import java.util.function.LongSupplier;",
+                "public final class Count implements LongReduction<String> {",
+                "  public LongSupplier supplier() { return () -> 0L; }",
+                "  public LongReducer<String> reducer() {",
+                "    return (state, value) -> state + 1L;",
+                "  }",
+                "}");
+    }
+
+    private static String nonStaticMemberSource() {
+        return lines(
+                "package invalid;",
+                "import io.github.jutil.reductionstore.LongReducer;",
+                "import io.github.jutil.reductionstore.LongReduction;",
+                "import java.util.function.LongSupplier;",
+                "public final class Row {}",
+                "final class Owner {",
+                "  final class Count implements LongReduction<Row> {",
+                "    public LongSupplier supplier() { return () -> 0L; }",
+                "    public LongReducer<Row> reducer() {",
+                "      return (state, row) -> state + 1L;",
+                "    }",
+                "  }",
+                "}");
+    }
+
+    private static String checkedConstructorSource() {
+        return lines(
+                "package invalid;",
+                "import io.github.jutil.reductionstore.LongReducer;",
+                "import io.github.jutil.reductionstore.LongReduction;",
+                "import java.io.IOException;",
+                "import java.util.function.LongSupplier;",
+                "public final class Row {}",
+                "final class Count implements LongReduction<Row> {",
+                "  Count() throws IOException {}",
+                "  public LongSupplier supplier() { return () -> 0L; }",
+                "  public LongReducer<Row> reducer() {",
+                "    return (state, row) -> state + 1L;",
+                "  }",
+                "}");
+    }
+
+    private static String modelRowSource() {
+        return lines(
+                "package model;",
+                "public final class Row {}");
+    }
+
+    private static String inaccessibleImplementationSource() {
+        return lines(
+                "package implementation;",
+                "import io.github.jutil.reductionstore.LongReducer;",
+                "import io.github.jutil.reductionstore.LongReduction;",
+                "import java.util.function.LongSupplier;",
+                "import model.Row;",
+                "final class Count implements LongReduction<Row> {",
+                "  public LongSupplier supplier() { return () -> 0L; }",
+                "  public LongReducer<Row> reducer() {",
+                "    return (state, row) -> state + 1L;",
+                "  }",
+                "}");
+    }
+
+    private static String inaccessibleStateSource() {
+        return lines(
+                "package implementation;",
+                "import io.github.jutil.reductionstore.Reduction;",
+                "import java.util.function.BiFunction;",
+                "import java.util.function.Supplier;",
+                "import model.Row;",
+                "final class HiddenState {}",
+                "public final class Count",
+                "    implements Reduction<Row, HiddenState> {",
+                "  public Supplier<HiddenState> supplier() {",
+                "    return HiddenState::new;",
+                "  }",
+                "  public BiFunction<HiddenState, Row, HiddenState> reducer() {",
+                "    return (state, row) -> state;",
+                "  }",
+                "}");
+    }
+
+    private static String objectMethodConflictSource() {
+        return lines(
+                "package invalid;",
+                "import io.github.jutil.reductionstore.LongReducer;",
+                "import io.github.jutil.reductionstore.LongReduction;",
+                "import java.util.function.LongSupplier;",
+                "public final class Row {}",
+                "final class ToString implements LongReduction<Row> {",
+                "  public LongSupplier supplier() { return () -> 0L; }",
+                "  public LongReducer<Row> reducer() {",
                 "    return (state, row) -> state + 1L;",
                 "  }",
                 "}");

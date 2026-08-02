@@ -559,6 +559,9 @@ public final class ReductionProcessor extends AbstractProcessor {
         line(source, "    /**");
         line(source, "     * Creates a store, initializes each state once, "
                 + "and resolves each reducer once.");
+        line(source, "     *");
+        line(source, "     * @throws NullPointerException if a reduction's "
+                + "supplier or reducer method returns {@code null}");
         line(source, "     */");
         line(source, "    public " + simpleName + "() {");
         for (int index = 0; index < group.reductions.size(); index++) {
@@ -566,11 +569,17 @@ public final class ReductionProcessor extends AbstractProcessor {
             line(source, "        " + reduction.implementationName
                     + " reduction" + index + " = new "
                     + reduction.implementationName + "();");
-            line(source, "        state" + index + " = reduction" + index
-                    + ".supplier()."
+            line(source, "        state" + index
+                    + " = java.util.Objects.requireNonNull(");
+            line(source, "                reduction" + index + ".supplier(),");
+            line(source, "                \"" + reduction.implementationName
+                    + ".supplier() returned null\")."
                     + reduction.stateKind.supplierGetter + "();");
-            line(source, "        reducer" + index + " = reduction" + index
-                    + ".reducer();");
+            line(source, "        reducer" + index
+                    + " = java.util.Objects.requireNonNull(");
+            line(source, "                reduction" + index + ".reducer(),");
+            line(source, "                \"" + reduction.implementationName
+                    + ".reducer() returned null\");");
         }
         line(source, "    }");
         line(source, "");

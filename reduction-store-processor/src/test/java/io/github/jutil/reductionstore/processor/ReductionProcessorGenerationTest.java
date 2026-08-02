@@ -6,6 +6,7 @@ import static io.github.jutil.reductionstore.processor.CompilerTestSupport.sourc
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -181,6 +182,75 @@ class ReductionProcessorGenerationTest {
     }
 
     @Test
+    void passesNullInputUnchangedAndAllowsNullObjectState(
+            @TempDir Path temporaryDirectory) throws Exception {
+        CompilerTestSupport.Compilation compilation = compile(
+                temporaryDirectory,
+                sources("nulls.Row", nullSemanticsSource()));
+
+        assertTrue(compilation.succeeded(), compilation.diagnostics());
+        try (URLClassLoader loader = compilation.newClassLoader()) {
+            Class<?> rowType = loader.loadClass("nulls.Row");
+            Class<?> storeType = loader.loadClass("nulls.RowReductionStore");
+            Object store = storeType.getConstructor().newInstance();
+
+            assertNull(storeType.getMethod("nullableState").invoke(store));
+            storeType.getMethod("add", rowType).invoke(
+                    store, new Object[]{null});
+
+            assertNull(storeType.getMethod("nullableState").invoke(store));
+            assertEquals(1L,
+                    storeType.getMethod("nullInputCount").invoke(store));
+            assertEquals(1,
+                    staticInt(loader, "nulls.NullableState", "invocations"));
+        }
+    }
+
+    @Test
+    void nullSupplierFailsStoreConstructionWithClearMessage(
+            @TempDir Path temporaryDirectory) throws Exception {
+        CompilerTestSupport.Compilation compilation = compile(
+                temporaryDirectory,
+                sources("nullsupplier.Row", nullSupplierSource()));
+
+        assertTrue(compilation.succeeded(), compilation.diagnostics());
+        try (URLClassLoader loader = compilation.newClassLoader()) {
+            Class<?> storeType = loader.loadClass(
+                    "nullsupplier.RowReductionStore");
+            InvocationTargetException thrown = assertThrows(
+                    InvocationTargetException.class,
+                    () -> storeType.getConstructor().newInstance());
+
+            assertTrue(thrown.getCause() instanceof NullPointerException);
+            assertEquals(
+                    "nullsupplier.NullSupplier.supplier() returned null",
+                    thrown.getCause().getMessage());
+        }
+    }
+
+    @Test
+    void nullReducerFailsStoreConstructionWithClearMessage(
+            @TempDir Path temporaryDirectory) throws Exception {
+        CompilerTestSupport.Compilation compilation = compile(
+                temporaryDirectory,
+                sources("nullreducer.Row", nullReducerSource()));
+
+        assertTrue(compilation.succeeded(), compilation.diagnostics());
+        try (URLClassLoader loader = compilation.newClassLoader()) {
+            Class<?> storeType = loader.loadClass(
+                    "nullreducer.RowReductionStore");
+            InvocationTargetException thrown = assertThrows(
+                    InvocationTargetException.class,
+                    () -> storeType.getConstructor().newInstance());
+
+            assertTrue(thrown.getCause() instanceof NullPointerException);
+            assertEquals(
+                    "nullreducer.NullReducer.reducer() returned null",
+                    thrown.getCause().getMessage());
+        }
+    }
+
+    @Test
     void serviceDiscoveryProcessesACompletelyUnannotatedClient(
             @TempDir Path temporaryDirectory) throws Exception {
         assertProcessorServiceRegistration();
@@ -208,9 +278,13 @@ class ReductionProcessorGenerationTest {
                 "io.github.jutil.reductionstore.LongReducer<mixed.Row>"));
         assertTrue(generated.contains(
                 "io.github.jutil.reductionstore.DoubleReducer<mixed.Row>"));
-        assertTrue(generated.contains(".supplier().getAsInt()"));
-        assertTrue(generated.contains(".supplier().getAsLong()"));
-        assertTrue(generated.contains(".supplier().getAsDouble()"));
+        assertTrue(generated.contains(".getAsInt()"));
+        assertTrue(generated.contains(".getAsLong()"));
+        assertTrue(generated.contains(".getAsDouble()"));
+        assertTrue(generated.contains(
+                "mixed.Flags.supplier() returned null"));
+        assertTrue(generated.contains(
+                "mixed.Flags.reducer() returned null"));
         assertFalse(generated.matches(
                 "(?s).*private\\s+(?:java\\.lang\\.)?"
                         + "(?:Integer|Long|Double|Object)\\s+state\\d+;.*"),
@@ -493,6 +567,61 @@ class ReductionProcessorGenerationTest {
                 "  public LongReducer<Row> reducer() {",
                 "    return (state, row) -> { invocations++; return state + 1; };",
                 "  }",
+                "}");
+    }
+
+    private static String nullSemanticsSource() {
+        return lines(
+                "package nulls;",
+                "import io.github.jutil.reductionstore.*;",
+                "import java.util.function.*;",
+                "public final class Row {}",
+                "final class NullableState implements Reduction<Row, String> {",
+                "  static int invocations;",
+                "  public Supplier<String> supplier() { return () -> null; }",
+                "  public BiFunction<String, Row, String> reducer() {",
+                "    return (state, row) -> {",
+                "      if (state != null || row != null) {",
+                "        throw new AssertionError(\"Expected null state and row\");",
+                "      }",
+                "      invocations++;",
+                "      return null;",
+                "    };",
+                "  }",
+                "}",
+                "final class NullInputCount implements LongReduction<Row> {",
+                "  public LongSupplier supplier() { return () -> 0L; }",
+                "  public LongReducer<Row> reducer() {",
+                "    return (state, row) -> row == null ? state + 1L : state;",
+                "  }",
+                "}");
+    }
+
+    private static String nullSupplierSource() {
+        return lines(
+                "package nullsupplier;",
+                "import io.github.jutil.reductionstore.Reduction;",
+                "import java.util.function.BiFunction;",
+                "import java.util.function.Supplier;",
+                "public final class Row {}",
+                "final class NullSupplier implements Reduction<Row, String> {",
+                "  public Supplier<String> supplier() { return null; }",
+                "  public BiFunction<String, Row, String> reducer() {",
+                "    return (state, row) -> state;",
+                "  }",
+                "}");
+    }
+
+    private static String nullReducerSource() {
+        return lines(
+                "package nullreducer;",
+                "import io.github.jutil.reductionstore.IntReducer;",
+                "import io.github.jutil.reductionstore.IntReduction;",
+                "import java.util.function.IntSupplier;",
+                "public final class Row {}",
+                "final class NullReducer implements IntReduction<Row> {",
+                "  public IntSupplier supplier() { return () -> 0; }",
+                "  public IntReducer<Row> reducer() { return null; }",
                 "}");
     }
 

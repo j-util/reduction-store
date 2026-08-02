@@ -103,6 +103,15 @@ public Map<String, Integer> countByCountry();
 public BigDecimal totalAmount();
 ```
 
+## Mapping input
+
+Mapping belongs to the ingestion pipeline. If only one reduction needs a
+different view of an input, fuse that mapping into the reduction's reducer. If
+several reductions share a mapped type, map each `SourceRow` to `Row` once
+before calling `RowReductionStore.add(row)`; the store then passes that same
+`Row` unchanged to every reducer. Reduction Store deliberately provides no
+mapper API and does not own input conversion.
+
 `IntReduction`, `LongReduction`, and `DoubleReduction` specialize the state,
 not the input value. Their generated state fields and accessor return types are
 the corresponding primitives. Their retained reducers accept and return those
@@ -124,11 +133,12 @@ copying it; primitive-state accessors return the current primitive value.
 
 `null` inputs are passed through. An object-state supplier or reducer may
 produce a `null` state; primitive states cannot be `null`. The supplier and
-reducer objects themselves must be non-null. If a constructor, supplier, or
-reducer fails, the exception propagates. During a failing `add`, earlier
-reductions remain applied and later reductions are not called. Object and
-primitive reductions share one qualified implementation-class-name ordering.
-Stores are not thread-safe.
+reducer objects themselves must be non-null; otherwise store construction fails
+with a `NullPointerException` naming the implementation and offending method.
+If a constructor, supplier, or reducer fails, the exception propagates. During
+a failing `add`, earlier reductions remain applied and later reductions are not
+called. Object and primitive reductions share one qualified
+implementation-class-name ordering. Stores are not thread-safe.
 
 For `k` reductions, construction performs `O(k)` library work plus the
 implementation constructors, supplier acquisition and invocation, and reducer
