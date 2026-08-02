@@ -83,11 +83,16 @@ public Map<String, Integer> countByCountry();
 public BigDecimal totalAmount();
 ```
 
-The store owns one implementation instance and one state per reduction. Its
-constructor initializes each state with `reduction.supplier().get()`. Every
-`add(value)` assigns the result of
-`reduction.reducer().apply(currentState, value)` back to that state. Accessors
-return the current state reference without copying it.
+During construction, the store creates one implementation instance per
+reduction as a local variable. It obtains each supplier once, invokes that
+supplier once to initialize the state, and obtains each reducer once. The
+store retains the fully typed reducer function and state, but no direct field
+reference to the reduction implementation. A returned reducer or state may
+still retain that implementation according to the reduction's own behavior.
+
+Every `add(value)` invokes each retained reducer exactly once as
+`reducer.apply(currentState, value)` and assigns the returned value back to
+that state. Accessors return the current state reference without copying it.
 
 `null` inputs are passed through, and a supplier or reducer may produce a
 `null` state. The supplier and reducer objects themselves must be non-null. If
@@ -97,9 +102,11 @@ called. Reductions run in qualified implementation-class-name order. Stores
 are not thread-safe.
 
 For `k` reductions, construction performs `O(k)` library work plus the
-suppliers, and `add` performs `O(k)` library work plus the reducers. Each state
-accessor is `O(1)`. Store overhead is `O(k)` references in addition to memory
-owned by the reduction states themselves.
+implementation constructors, supplier acquisition and invocation, and reducer
+acquisition. Each `add` performs `O(k)` library work plus one invocation of
+each retained reducer. Each state accessor is `O(1)`. Store fields contribute
+two references per reduction: one retained reducer and one current state, in
+addition to memory reachable from those objects.
 
 ## Discovery and V1 limits
 

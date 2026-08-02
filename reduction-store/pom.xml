@@ -34,12 +34,12 @@
 
     <issueManagement>
         <system>GitHub Issues</system>
-        <url>https://github.com/j-util/reductions-store/issues</url>
+        <url>https://github.com/j-util/reduction-store/issues</url>
     </issueManagement>
 
     <scm>
-        <connection>scm:git:https://github.com/j-util/reductions-store.git</connection>
-        <developerConnection>scm:git:ssh://git@github.com/j-util/reductions-store.git</developerConnection>
+        <connection>scm:git:https://github.com/j-util/reduction-store.git</connection>
+        <developerConnection>scm:git:ssh://git@github.com/j-util/reduction-store.git</developerConnection>
         <url>https://github.com/j-util/reduction-store</url>
         <tag>HEAD</tag>
     </scm>

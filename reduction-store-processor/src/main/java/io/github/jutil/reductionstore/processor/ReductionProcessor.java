@@ -539,23 +539,27 @@ public final class ReductionProcessor extends AbstractProcessor {
         line(source, "");
         for (int index = 0; index < group.reductions.size(); index++) {
             ReductionDescriptor reduction = group.reductions.get(index);
-            line(source, "    private final " + reduction.implementationName
-                    + " reduction" + index + ";");
+            line(source, "    private final java.util.function.BiFunction<"
+                    + reduction.stateType + ", " + group.sourceName + ", "
+                    + reduction.stateType + "> reducer" + index + ";");
             line(source, "    private " + reduction.stateType + " state"
                     + index + ";");
         }
         line(source, "");
         line(source, "    /**");
-        line(source, "     * Creates a store and initializes each reduction "
-                + "state once.");
+        line(source, "     * Creates a store, initializes each state once, "
+                + "and resolves each reducer once.");
         line(source, "     */");
         line(source, "    public " + simpleName + "() {");
         for (int index = 0; index < group.reductions.size(); index++) {
             ReductionDescriptor reduction = group.reductions.get(index);
-            line(source, "        reduction" + index + " = new "
+            line(source, "        " + reduction.implementationName
+                    + " reduction" + index + " = new "
                     + reduction.implementationName + "();");
             line(source, "        state" + index + " = reduction" + index
                     + ".supplier().get();");
+            line(source, "        reducer" + index + " = reduction" + index
+                    + ".reducer();");
         }
         line(source, "    }");
         line(source, "");
@@ -571,8 +575,8 @@ public final class ReductionProcessor extends AbstractProcessor {
         line(source, "     */");
         line(source, "    public void add(" + group.sourceName + " value) {");
         for (int index = 0; index < group.reductions.size(); index++) {
-            line(source, "        state" + index + " = reduction" + index
-                    + ".reducer().apply(state" + index + ", value);");
+            line(source, "        state" + index + " = reducer" + index
+                    + ".apply(state" + index + ", value);");
         }
         line(source, "    }");
         for (int index = 0; index < group.reductions.size(); index++) {
