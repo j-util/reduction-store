@@ -48,8 +48,6 @@ import javax.tools.JavaFileObject;
 @SupportedAnnotationTypes("*")
 public final class ReductionProcessor extends AbstractProcessor {
 
-    private static final String REDUCTION_TYPE =
-            "io.github.jutil.reductionstore.Reduction";
     private static final String STORE_SUFFIX = "ReductionStore";
 
     private Elements elements;
@@ -114,7 +112,8 @@ public final class ReductionProcessor extends AbstractProcessor {
         }
         processedInitialSources = true;
 
-        TypeElement reductionElement = elements.getTypeElement(REDUCTION_TYPE);
+        TypeElement reductionElement = elements.getTypeElement(
+                StateKind.OBJECT.contractType);
         if (reductionElement == null) {
             return false;
         }
@@ -133,9 +132,9 @@ public final class ReductionProcessor extends AbstractProcessor {
         Map<String, ReductionGroup> groups =
                 new LinkedHashMap<String, ReductionGroup>();
         for (TypeElement type : compilationTypes) {
-            DeclaredType reductionType = findReductionType(
+            ResolvedReduction reduction = findReductionType(
                     type.asType(), new HashSet<String>());
-            if (reductionType == null) {
+            if (reduction == null) {
                 continue;
             }
             if (type.getKind() != ElementKind.CLASS
@@ -149,7 +148,7 @@ public final class ReductionProcessor extends AbstractProcessor {
                 continue;
             }
             collectReduction(
-                    type, reductionType, currentTopLevelTypes, groups);
+                    type, reduction, currentTopLevelTypes, groups);
         }
 
         List<ReductionGroup> orderedGroups =
@@ -178,7 +177,7 @@ public final class ReductionProcessor extends AbstractProcessor {
         }
     }
 
-    private DeclaredType findReductionType(
+    private ResolvedReduction findReductionType(
             TypeMirror type, Set<String> visited) {
         if (type.getKind() != TypeKind.DECLARED
                 && type.getKind() != TypeKind.ERROR) {
@@ -186,14 +185,16 @@ public final class ReductionProcessor extends AbstractProcessor {
         }
         DeclaredType declaredType = (DeclaredType) type;
         TypeElement typeElement = (TypeElement) declaredType.asElement();
-        if (typeElement.getQualifiedName().contentEquals(REDUCTION_TYPE)) {
-            return declaredType;
+        StateKind stateKind = StateKind.forContract(
+                typeElement.getQualifiedName());
+        if (stateKind != null) {
+            return new ResolvedReduction(stateKind, declaredType);
         }
         if (!visited.add(type.toString())) {
             return null;
         }
         for (TypeMirror supertype : types.directSupertypes(declaredType)) {
-            DeclaredType found = findReductionType(supertype, visited);
+            ResolvedReduction found = findReductionType(supertype, visited);
             if (found != null) {
                 return found;
             }
@@ -203,18 +204,21 @@ public final class ReductionProcessor extends AbstractProcessor {
 
     private void collectReduction(
             TypeElement implementation,
-            DeclaredType reductionType,
+            ResolvedReduction reduction,
             Set<String> currentTopLevelTypes,
             Map<String, ReductionGroup> groups) {
-        List<? extends TypeMirror> arguments = reductionType.getTypeArguments();
-        if (arguments.size() != 2) {
+        List<? extends TypeMirror> arguments =
+                reduction.type.getTypeArguments();
+        if (arguments.size() != reduction.stateKind.typeParameterCount) {
             error(implementation,
-                    "Reduction must not be implemented as a raw type");
+                    reduction.stateKind.simpleName
+                            + " must not be implemented as a raw type");
             return;
         }
 
         TypeMirror sourceType = arguments.get(0);
-        TypeMirror stateType = arguments.get(1);
+        TypeMirror stateType = reduction.stateKind == StateKind.OBJECT
+                ? arguments.get(1) : null;
         if (sourceType.getKind() != TypeKind.DECLARED) {
             error(implementation,
                     "Reduction input type must be a declared top-level type");
@@ -269,17 +273,19 @@ public final class ReductionProcessor extends AbstractProcessor {
         if (!hasUsableNoArgConstructor(implementation, generatedPackage)) {
             valid = false;
         }
-        if (!isRepresentableStateType(stateType)) {
-            error(implementation,
-                    "Reduction state type must be a concrete source-level "
-                            + "reference type: " + stateType);
-            valid = false;
-        } else if (!isAccessible(stateType, generatedPackage)) {
-            error(implementation,
-                    "Reduction state type is not accessible from generated "
-                            + "package " + packageName(generatedPackage)
-                            + ": " + stateType);
-            valid = false;
+        if (reduction.stateKind == StateKind.OBJECT) {
+            if (!isRepresentableStateType(stateType)) {
+                error(implementation,
+                        "Reduction state type must be a concrete source-level "
+                                + "reference type: " + stateType);
+                valid = false;
+            } else if (!isAccessible(stateType, generatedPackage)) {
+                error(implementation,
+                        "Reduction state type is not accessible from generated "
+                                + "package " + packageName(generatedPackage)
+                                + ": " + stateType);
+                valid = false;
+            }
         }
 
         if (!valid) {
@@ -292,7 +298,10 @@ public final class ReductionProcessor extends AbstractProcessor {
         group.reductions.add(new ReductionDescriptor(
                 implementation,
                 implementation.getQualifiedName().toString(),
-                stateType.toString(),
+                reduction.stateKind,
+                reduction.stateKind == StateKind.OBJECT
+                        ? stateType.toString()
+                        : reduction.stateKind.primitiveType,
                 accessorName));
     }
 
@@ -539,9 +548,10 @@ public final class ReductionProcessor extends AbstractProcessor {
         line(source, "");
         for (int index = 0; index < group.reductions.size(); index++) {
             ReductionDescriptor reduction = group.reductions.get(index);
-            line(source, "    private final java.util.function.BiFunction<"
-                    + reduction.stateType + ", " + group.sourceName + ", "
-                    + reduction.stateType + "> reducer" + index + ";");
+            line(source, "    private final "
+                    + reduction.stateKind.reducerType(
+                            reduction.stateType, group.sourceName)
+                    + " reducer" + index + ";");
             line(source, "    private " + reduction.stateType + " state"
                     + index + ";");
         }
@@ -557,7 +567,8 @@ public final class ReductionProcessor extends AbstractProcessor {
                     + " reduction" + index + " = new "
                     + reduction.implementationName + "();");
             line(source, "        state" + index + " = reduction" + index
-                    + ".supplier().get();");
+                    + ".supplier()."
+                    + reduction.stateKind.supplierGetter + "();");
             line(source, "        reducer" + index + " = reduction" + index
                     + ".reducer();");
         }
@@ -586,8 +597,12 @@ public final class ReductionProcessor extends AbstractProcessor {
             line(source, "     * Returns the current state of {@link "
                     + reduction.implementationName + "}.");
             line(source, "     *");
-            line(source, "     * @return the current state, possibly "
-                    + "{@code null}");
+            if (reduction.stateKind == StateKind.OBJECT) {
+                line(source, "     * @return the current state, possibly "
+                        + "{@code null}");
+            } else {
+                line(source, "     * @return the current primitive state");
+            }
             line(source, "     */");
             line(source, "    public " + reduction.stateType + " "
                     + reduction.accessorName + "() {");
@@ -632,18 +647,102 @@ public final class ReductionProcessor extends AbstractProcessor {
     private static final class ReductionDescriptor {
         private final TypeElement implementation;
         private final String implementationName;
+        private final StateKind stateKind;
         private final String stateType;
         private final String accessorName;
 
         private ReductionDescriptor(
                 TypeElement implementation,
                 String implementationName,
+                StateKind stateKind,
                 String stateType,
                 String accessorName) {
             this.implementation = implementation;
             this.implementationName = implementationName;
+            this.stateKind = stateKind;
             this.stateType = stateType;
             this.accessorName = accessorName;
+        }
+    }
+
+    private static final class ResolvedReduction {
+        private final StateKind stateKind;
+        private final DeclaredType type;
+
+        private ResolvedReduction(
+                StateKind stateKind, DeclaredType type) {
+            this.stateKind = stateKind;
+            this.type = type;
+        }
+    }
+
+    private enum StateKind {
+        OBJECT(
+                "io.github.jutil.reductionstore.Reduction",
+                "Reduction",
+                2,
+                null,
+                null,
+                "get"),
+        INT(
+                "io.github.jutil.reductionstore.IntReduction",
+                "IntReduction",
+                1,
+                "int",
+                "io.github.jutil.reductionstore.IntReducer",
+                "getAsInt"),
+        LONG(
+                "io.github.jutil.reductionstore.LongReduction",
+                "LongReduction",
+                1,
+                "long",
+                "io.github.jutil.reductionstore.LongReducer",
+                "getAsLong"),
+        DOUBLE(
+                "io.github.jutil.reductionstore.DoubleReduction",
+                "DoubleReduction",
+                1,
+                "double",
+                "io.github.jutil.reductionstore.DoubleReducer",
+                "getAsDouble");
+
+        private final String contractType;
+        private final String simpleName;
+        private final int typeParameterCount;
+        private final String primitiveType;
+        private final String reducerType;
+        private final String supplierGetter;
+
+        StateKind(
+                String contractType,
+                String simpleName,
+                int typeParameterCount,
+                String primitiveType,
+                String reducerType,
+                String supplierGetter) {
+            this.contractType = contractType;
+            this.simpleName = simpleName;
+            this.typeParameterCount = typeParameterCount;
+            this.primitiveType = primitiveType;
+            this.reducerType = reducerType;
+            this.supplierGetter = supplierGetter;
+        }
+
+        private static StateKind forContract(CharSequence name) {
+            for (StateKind stateKind : values()) {
+                if (stateKind.contractType.contentEquals(name)) {
+                    return stateKind;
+                }
+            }
+            return null;
+        }
+
+        private String reducerType(String stateType, String sourceType) {
+            if (this == OBJECT) {
+                return "java.util.function.BiFunction<" + stateType + ", "
+                        + sourceType + ", " + stateType + ">";
+            }
+            return reducerType + "<" + sourceType + ">";
         }
     }
 }
