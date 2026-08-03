@@ -4,6 +4,8 @@ This file records user-visible changes to Reduction Store.
 
 ## Unreleased
 
+## 1.0.0 - 2026-08-03
+
 ### Added
 
 - Object-state and primitive-state reduction contracts with compile-time

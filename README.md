@@ -1,12 +1,17 @@
 # Reduction Store
 
+[![Maven Central](https://img.shields.io/maven-central/v/io.github.j-util/reduction-store.svg?label=Maven%20Central)](https://central.sonatype.com/artifact/io.github.j-util/reduction-store)
+
 Reduction Store generates a strongly typed in-memory reduction store from
 ordinary classes that implement `Reduction<P, R>`, `IntReduction<P>`,
 `LongReduction<P>`, or `DoubleReduction<P>`. Client reduction classes do not
 use annotations. The runtime contract and compiler processor are separate,
 dependency-free Java 8 artifacts.
 
-This first version is unreleased and uses version `0.1.0-SNAPSHOT`.
+The current version is `1.0.0`. Both artifacts are available from Maven Central:
+
+- [`io.github.j-util:reduction-store`](https://central.sonatype.com/artifact/io.github.j-util/reduction-store)
+- [`io.github.j-util:reduction-store-processor`](https://central.sonatype.com/artifact/io.github.j-util/reduction-store-processor)
 
 ## Client configuration
 
@@ -16,7 +21,7 @@ processor belongs only on the annotation-processor path:
 ```xml
 <properties>
     <maven.compiler.release>8</maven.compiler.release>
-    <reduction-store.version>0.1.0-SNAPSHOT</reduction-store.version>
+    <reduction-store.version>1.0.0</reduction-store.version>
 </properties>
 
 <dependencies>
@@ -48,8 +53,7 @@ processor belongs only on the annotation-processor path:
 ```
 
 Explicit processor-path configuration is required for predictable builds and
-for javac on JDK 23 and later. Until the artifacts are published, run
-`./mvnw install` in this repository before compiling a separate Maven client.
+for javac on JDK 23 and later.
 
 For contributors, `./mvnw verify` also builds two separate isolated Maven
 consumers under `reduction-store-processor/src/it`. One verifies ordinary
