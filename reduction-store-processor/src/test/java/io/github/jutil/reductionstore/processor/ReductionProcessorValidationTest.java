@@ -281,14 +281,14 @@ class ReductionProcessorValidationTest {
     }
 
     @Test
-    void reportsExplicitTypesStillUnresolvedAfterProcessing(
+    void rejectsExplicitTypesNotVisibleToCurrentCompilation(
             @TempDir Path temporaryDirectory) throws Exception {
         assertRejected(
                 temporaryDirectory,
                 "unresolved.Definition",
                 unresolvedExplicitDefinitionSource(),
-                "ReductionStoreDefinition class values remain unresolved "
-                        + "after all processing rounds");
+                "must reference a type visible to the current compilation "
+                        + "as a source type or compiled dependency");
     }
 
     @Test

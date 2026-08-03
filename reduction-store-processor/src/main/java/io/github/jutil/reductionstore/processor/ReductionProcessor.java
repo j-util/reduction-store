@@ -39,8 +39,9 @@ import javax.tools.Diagnostic;
 import javax.tools.JavaFileObject;
 
 /**
- * Generates one strongly typed reduction store for each supported input type
- * found in the compiler's root source elements.
+ * Generates strongly typed reduction stores through automatic root-source
+ * discovery or an optional explicit definition whose listed types are already
+ * visible to the current compilation.
  *
  * <p>This is a universal processor: it supports {@code "*"}, so javac invokes
  * it even when client sources have no annotations. Applications should
@@ -116,8 +117,7 @@ public final class ReductionProcessor extends AbstractProcessor {
     public boolean process(
             Set<? extends TypeElement> annotations,
             RoundEnvironment roundEnvironment) {
-        if (roundEnvironment.processingOver()) {
-            reportUnresolvedDefinitions();
+        if (roundEnvironment.processingOver() || processedInitialSources) {
             return false;
         }
 
@@ -135,10 +135,6 @@ public final class ReductionProcessor extends AbstractProcessor {
                             definitionAnnotation));
         }
         processExplicitDefinitions();
-
-        if (processedInitialSources) {
-            return false;
-        }
         processedInitialSources = true;
         processAutomaticDefinitions(roundEnvironment);
         return false;
@@ -245,9 +241,8 @@ public final class ReductionProcessor extends AbstractProcessor {
 
     private void readExplicitDefinitionValues(
             ExplicitDefinition definition) {
-        definition.input = null;
+        definition.inputElement = null;
         definition.reductions.clear();
-        definition.valuesUnresolved = false;
 
         AnnotationMirror annotation = definitionAnnotation(
                 definition.element);
@@ -272,13 +267,13 @@ public final class ReductionProcessor extends AbstractProcessor {
             }
         }
 
-        definition.input = classReference(
+        definition.inputElement = classReference(
                 definition, inputValue, "input()");
         if (reductionsValue != null
                 && reductionsValue.getValue() instanceof List<?>) {
             for (Object item : (List<?>) reductionsValue.getValue()) {
                 if (item instanceof AnnotationValue) {
-                    TypeReference reference = classReference(
+                    TypeElement reference = classReference(
                             definition,
                             (AnnotationValue) item,
                             "reductions()");
@@ -288,27 +283,34 @@ public final class ReductionProcessor extends AbstractProcessor {
                 }
             }
         } else {
-            definitionError(
-                    definition,
-                    "ReductionStoreDefinition reductions() must be a class "
-                            + "array");
+            if (reductionsValue != null
+                    && "<error>".equals(reductionsValue.getValue())) {
+                definitionError(
+                        definition,
+                        "ReductionStoreDefinition reductions() must reference "
+                                + "types visible to the current compilation "
+                                + "as source types or compiled dependencies");
+            } else {
+                definitionError(
+                        definition,
+                        "ReductionStoreDefinition reductions() must be a "
+                                + "class array");
+            }
         }
 
-        if (definition.valuesUnresolved) {
-            return;
-        }
         if (definition.reductions.isEmpty()) {
             definitionError(
                     definition,
                     "ReductionStoreDefinition reductions() must not be empty");
         }
         Set<String> reductionNames = new HashSet<String>();
-        for (TypeReference reduction : definition.reductions) {
-            if (!reductionNames.add(reduction.name)) {
+        for (TypeElement reduction : definition.reductions) {
+            String reductionName = reduction.getQualifiedName().toString();
+            if (!reductionNames.add(reductionName)) {
                 definitionError(
                         definition,
                         "ReductionStoreDefinition contains duplicate reduction "
-                                + reduction.displayName);
+                                + reductionName);
             }
         }
     }
@@ -328,13 +330,18 @@ public final class ReductionProcessor extends AbstractProcessor {
         return null;
     }
 
-    private TypeReference classReference(
+    private TypeElement classReference(
             ExplicitDefinition definition,
             AnnotationValue value,
             String memberName) {
         if (value == null || !(value.getValue() instanceof TypeMirror)) {
             if (value != null && "<error>".equals(value.getValue())) {
-                definition.valuesUnresolved = true;
+                definitionError(
+                        definition,
+                        "ReductionStoreDefinition " + memberName
+                                + " must reference a type visible to the "
+                                + "current compilation as a source type or "
+                                + "compiled dependency");
                 return null;
             }
             definitionError(
@@ -344,8 +351,16 @@ public final class ReductionProcessor extends AbstractProcessor {
             return null;
         }
         TypeMirror type = (TypeMirror) value.getValue();
-        if (type.getKind() != TypeKind.DECLARED
-                && type.getKind() != TypeKind.ERROR) {
+        if (type.getKind() == TypeKind.ERROR) {
+            definitionError(
+                    definition,
+                    "ReductionStoreDefinition " + memberName
+                            + " must reference a type visible to the current "
+                            + "compilation as a source type or compiled "
+                            + "dependency: " + type);
+            return null;
+        }
+        if (type.getKind() != TypeKind.DECLARED) {
             definitionError(
                     definition,
                     "ReductionStoreDefinition " + memberName
@@ -360,74 +375,26 @@ public final class ReductionProcessor extends AbstractProcessor {
                             + " could not be resolved: " + type);
             return null;
         }
-        String name = ((TypeElement) typeElement).getQualifiedName()
-                .toString();
-        if (name.length() == 0) {
-            name = type.toString();
-        }
-        return new TypeReference(name, type.toString());
+        return (TypeElement) typeElement;
     }
 
     private void processExplicitDefinitions() {
         for (ExplicitDefinition definition : explicitDefinitions.values()) {
-            if (definition.completed) {
-                continue;
-            }
-            if (definition.valuesUnresolved) {
-                readExplicitDefinitionValues(definition);
-            }
-            if (definition.valuesUnresolved || definition.input == null) {
-                continue;
-            }
-            TypeElement inputElement = resolve(definition.input);
-            if (inputElement == null) {
-                continue;
-            }
-            definition.inputElement = inputElement;
-            if (definition.targetName == null) {
-                PackageElement generatedPackage = elements.getPackageOf(
-                        definition.element);
-                definition.targetName = qualifiedStoreName(
-                        generatedPackage, inputElement);
-                registerDefinitionTarget(definition);
-            }
-        }
-
-        for (ExplicitDefinition definition : explicitDefinitions.values()) {
-            if (definition.completed) {
-                continue;
-            }
-            if (definition.valuesUnresolved) {
-                continue;
-            }
-            if (definition.failed) {
-                definition.completed = true;
-                continue;
-            }
             if (definition.inputElement == null) {
                 continue;
             }
+            PackageElement generatedPackage = elements.getPackageOf(
+                    definition.element);
+            definition.targetName = qualifiedStoreName(
+                    generatedPackage, definition.inputElement);
+            registerDefinitionTarget(definition);
+        }
 
-            List<TypeElement> implementations = new ArrayList<TypeElement>();
-            boolean unresolved = false;
-            for (TypeReference reduction : definition.reductions) {
-                TypeElement implementation = resolve(reduction);
-                if (implementation == null
-                        || containsErrorInHierarchy(
-                                implementation.asType(),
-                                new HashSet<String>())) {
-                    unresolved = true;
-                    definition.unresolvedReduction = reduction.displayName;
-                    break;
-                }
-                implementations.add(implementation);
-            }
-            if (unresolved) {
+        for (ExplicitDefinition definition : explicitDefinitions.values()) {
+            if (definition.failed || definition.inputElement == null) {
                 continue;
             }
-            definition.unresolvedReduction = null;
-            validateAndGenerateDefinition(definition, implementations);
-            definition.completed = true;
+            validateAndGenerateDefinition(definition, definition.reductions);
         }
     }
 
@@ -533,51 +500,6 @@ public final class ReductionProcessor extends AbstractProcessor {
         }
     }
 
-    private TypeElement resolve(TypeReference reference) {
-        TypeElement element = elements.getTypeElement(reference.name);
-        if (element == null || element.asType().getKind() == TypeKind.ERROR) {
-            return null;
-        }
-        return element;
-    }
-
-    private void reportUnresolvedDefinitions() {
-        for (ExplicitDefinition definition : explicitDefinitions.values()) {
-            if (definition.completed) {
-                continue;
-            }
-            if (definition.valuesUnresolved) {
-                error(definition.element,
-                        "ReductionStoreDefinition class values remain "
-                                + "unresolved after all processing rounds");
-                definition.completed = true;
-                continue;
-            }
-            if (definition.input != null
-                    && resolve(definition.input) == null) {
-                error(definition.element,
-                        "ReductionStoreDefinition input type remains "
-                                + "unresolved after all processing rounds: "
-                                + definition.input.displayName);
-            }
-            for (TypeReference reduction : definition.reductions) {
-                if (resolve(reduction) == null) {
-                    error(definition.element,
-                            "ReductionStoreDefinition reduction type remains "
-                                    + "unresolved after all processing rounds: "
-                                    + reduction.displayName);
-                }
-            }
-            if (definition.unresolvedReduction != null) {
-                error(definition.element,
-                        "ReductionStoreDefinition reduction hierarchy remains "
-                                + "unresolved after all processing rounds: "
-                                + definition.unresolvedReduction);
-            }
-            definition.completed = true;
-        }
-    }
-
     private void definitionError(
             ExplicitDefinition definition, String message) {
         error(definition.element, message);
@@ -635,29 +557,6 @@ public final class ReductionProcessor extends AbstractProcessor {
         for (TypeMirror supertype : types.directSupertypes(declaredType)) {
             findReductionTypes(supertype, visited, found);
         }
-    }
-
-    private boolean containsErrorInHierarchy(
-            TypeMirror type, Set<String> visited) {
-        if (type.getKind() == TypeKind.ERROR) {
-            return true;
-        }
-        if (type.getKind() != TypeKind.DECLARED
-                || !visited.add(type.toString())) {
-            return false;
-        }
-        DeclaredType declaredType = (DeclaredType) type;
-        for (TypeMirror argument : declaredType.getTypeArguments()) {
-            if (containsErrorType(argument)) {
-                return true;
-            }
-        }
-        for (TypeMirror supertype : types.directSupertypes(declaredType)) {
-            if (containsErrorInHierarchy(supertype, visited)) {
-                return true;
-            }
-        }
-        return false;
     }
 
     private boolean containsErrorType(TypeMirror type) {
@@ -1272,29 +1171,15 @@ public final class ReductionProcessor extends AbstractProcessor {
 
     private static final class ExplicitDefinition {
         private final TypeElement element;
-        private final List<TypeReference> reductions =
-                new ArrayList<TypeReference>();
-        private TypeReference input;
+        private final List<TypeElement> reductions =
+                new ArrayList<TypeElement>();
         private TypeElement inputElement;
         private String targetName;
-        private String unresolvedReduction;
         private boolean failed;
-        private boolean completed;
         private boolean collisionReported;
-        private boolean valuesUnresolved;
 
         private ExplicitDefinition(TypeElement element) {
             this.element = element;
-        }
-    }
-
-    private static final class TypeReference {
-        private final String name;
-        private final String displayName;
-
-        private TypeReference(String name, String displayName) {
-            this.name = name;
-            this.displayName = displayName;
         }
     }
 

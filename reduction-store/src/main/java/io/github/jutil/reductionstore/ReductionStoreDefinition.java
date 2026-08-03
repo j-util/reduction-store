@@ -20,7 +20,10 @@ import java.lang.annotation.Target;
  * order does not affect execution order; generated stores continue to execute
  * reductions in qualified implementation-name order. The input, reduction
  * implementations, constructors, and state types must be accessible from the
- * annotated interface's package.
+ * annotated interface's package. Listed input and reduction types must already
+ * be visible to the current compilation as source types or compiled
+ * dependencies; class values generated in a later annotation-processing round
+ * are not supported.
  */
 @Documented
 @Retention(RetentionPolicy.SOURCE)

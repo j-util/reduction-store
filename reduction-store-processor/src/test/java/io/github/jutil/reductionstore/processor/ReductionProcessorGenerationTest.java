@@ -1,7 +1,6 @@
 package io.github.jutil.reductionstore.processor;
 
 import static io.github.jutil.reductionstore.processor.CompilerTestSupport.compile;
-import static io.github.jutil.reductionstore.processor.CompilerTestSupport.compileWithProcessors;
 import static io.github.jutil.reductionstore.processor.CompilerTestSupport.lines;
 import static io.github.jutil.reductionstore.processor.CompilerTestSupport.sources;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -18,7 +17,6 @@ import io.github.jutil.reductionstore.LongReducer;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
-import java.io.Writer;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
@@ -31,12 +29,6 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.function.BiFunction;
 import java.util.function.Supplier;
-import javax.annotation.processing.AbstractProcessor;
-import javax.annotation.processing.RoundEnvironment;
-import javax.annotation.processing.SupportedAnnotationTypes;
-import javax.lang.model.SourceVersion;
-import javax.lang.model.element.TypeElement;
-import javax.tools.JavaFileObject;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -331,22 +323,6 @@ class ReductionProcessorGenerationTest {
                 "authority.RowReductionStore");
         assertTrue(generated.contains("new authority.Count()"), generated);
         assertFalse(generated.contains("authority.Unlisted"), generated);
-    }
-
-    @Test
-    void retriesExplicitTypesGeneratedInALaterRound(
-            @TempDir Path temporaryDirectory) throws Exception {
-        CompilerTestSupport.Compilation compilation = compileWithProcessors(
-                temporaryDirectory,
-                sources(
-                        "deferred.RowStoreDefinition",
-                        deferredDefinitionSource()),
-                new DeferredTypesProcessor(),
-                new ReductionProcessor());
-
-        assertTrue(compilation.succeeded(), compilation.diagnostics());
-        assertNotNull(compilation.generatedSource(
-                "deferred.GeneratedRowReductionStore"));
     }
 
     private static void assertPrimitiveSourceShape(String generated) {
@@ -817,68 +793,4 @@ class ReductionProcessorGenerationTest {
                 "interface Definition {}");
     }
 
-    private static String deferredDefinitionSource() {
-        return lines(
-                "package deferred;",
-                "import io.github.jutil.reductionstore.ReductionStoreDefinition;",
-                "@ReductionStoreDefinition(",
-                "    input = GeneratedRow.class,",
-                "    reductions = GeneratedCount.class)",
-                "public interface RowStoreDefinition {}");
-    }
-
-    @SupportedAnnotationTypes("*")
-    private static final class DeferredTypesProcessor
-            extends AbstractProcessor {
-        private boolean generated;
-
-        @Override
-        public SourceVersion getSupportedSourceVersion() {
-            return SourceVersion.latestSupported();
-        }
-
-        @Override
-        public boolean process(
-                java.util.Set<? extends TypeElement> annotations,
-                RoundEnvironment roundEnvironment) {
-            if (generated || roundEnvironment.processingOver()) {
-                return false;
-            }
-            generated = true;
-            try {
-                writeSource(
-                        "deferred.GeneratedRow",
-                        lines(
-                                "package deferred;",
-                                "public final class GeneratedRow {}"));
-                writeSource(
-                        "deferred.GeneratedCount",
-                        lines(
-                                "package deferred;",
-                                "import io.github.jutil.reductionstore.*;",
-                                "import java.util.function.LongSupplier;",
-                                "public final class GeneratedCount",
-                                "    implements LongReduction<GeneratedRow> {",
-                                "  public LongSupplier supplier() {",
-                                "    return () -> 0L;",
-                                "  }",
-                                "  public LongReducer<GeneratedRow> reducer() {",
-                                "    return (state, row) -> state + 1L;",
-                                "  }",
-                                "}"));
-            } catch (IOException exception) {
-                throw new IllegalStateException(exception);
-            }
-            return false;
-        }
-
-        private void writeSource(String name, String source)
-                throws IOException {
-            JavaFileObject file = processingEnv.getFiler()
-                    .createSourceFile(name);
-            try (Writer writer = file.openWriter()) {
-                writer.write(source);
-            }
-        }
-    }
 }
