@@ -1,4 +1,4 @@
-package example;
+package model;
 
 public final class Row {
 

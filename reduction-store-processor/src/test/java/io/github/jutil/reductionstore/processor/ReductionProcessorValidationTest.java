@@ -176,6 +176,131 @@ class ReductionProcessorValidationTest {
                         + "java.lang.Object");
     }
 
+    @Test
+    void rejectsEmptyExplicitReductionList(
+            @TempDir Path temporaryDirectory) throws Exception {
+        assertRejected(
+                temporaryDirectory,
+                "explicit.Definition",
+                emptyExplicitDefinitionSource(),
+                "ReductionStoreDefinition reductions() must not be empty");
+    }
+
+    @Test
+    void rejectsDuplicateExplicitReductions(
+            @TempDir Path temporaryDirectory) throws Exception {
+        assertRejected(
+                temporaryDirectory,
+                "explicit.Definition",
+                duplicateExplicitReductionSource(),
+                "ReductionStoreDefinition contains duplicate reduction");
+    }
+
+    @Test
+    void rejectsExplicitReductionWithMismatchedInput(
+            @TempDir Path temporaryDirectory) throws Exception {
+        assertRejected(
+                temporaryDirectory,
+                "explicit.Definition",
+                mismatchedExplicitInputSource(),
+                "does not exactly match definition input explicit.Row");
+    }
+
+    @Test
+    void rejectsExplicitNonReductionClass(
+            @TempDir Path temporaryDirectory) throws Exception {
+        assertRejected(
+                temporaryDirectory,
+                "explicit.Definition",
+                explicitNonReductionSource(),
+                "must implement exactly one supported reduction contract");
+    }
+
+    @Test
+    void rejectsExplicitImplementationInaccessibleFromDefinitionPackage(
+            @TempDir Path temporaryDirectory) throws Exception {
+        CompilerTestSupport.Compilation compilation = compile(
+                temporaryDirectory,
+                sources(
+                        "model.Row", modelRowSource(),
+                        "implementation.Count",
+                        inaccessibleImplementationSource(),
+                        "composition.Definition",
+                        inaccessibleExplicitImplementationDefinition()));
+
+        assertRejected(
+                compilation,
+                "implementation.Count is not public in implementation");
+    }
+
+    @Test
+    void rejectsExplicitStateInaccessibleFromDefinitionPackage(
+            @TempDir Path temporaryDirectory) throws Exception {
+        CompilerTestSupport.Compilation compilation = compile(
+                temporaryDirectory,
+                sources(
+                        "model.Row", modelRowSource(),
+                        "implementation.Count", inaccessibleStateSource(),
+                        "composition.Definition",
+                        inaccessibleExplicitStateDefinition()));
+
+        assertRejected(
+                compilation,
+                "Reduction state type is not accessible from generated "
+                        + "package composition");
+    }
+
+    @Test
+    void rejectsExplicitGeneratedNameCollision(
+            @TempDir Path temporaryDirectory) throws Exception {
+        assertRejected(
+                temporaryDirectory,
+                "collision.Definition",
+                explicitNameCollisionSource(),
+                "Generated reduction store name conflicts with existing type "
+                        + "collision.RowReductionStore");
+    }
+
+    @Test
+    void rejectsDuplicateExplicitGeneratedTargets(
+            @TempDir Path temporaryDirectory) throws Exception {
+        CompilerTestSupport.Compilation compilation = compile(
+                temporaryDirectory,
+                sources(
+                        "first.Row", firstDuplicateTargetInput(),
+                        "first.Count", firstDuplicateTargetReduction(),
+                        "second.Row", secondDuplicateTargetInput(),
+                        "second.Count", secondDuplicateTargetReduction(),
+                        "composition.Definitions",
+                        duplicateTargetDefinitions()));
+
+        assertRejected(
+                compilation,
+                "Multiple ReductionStoreDefinition declarations target "
+                        + "generated class composition.RowReductionStore");
+    }
+
+    @Test
+    void reportsExplicitTypesStillUnresolvedAfterProcessing(
+            @TempDir Path temporaryDirectory) throws Exception {
+        assertRejected(
+                temporaryDirectory,
+                "unresolved.Definition",
+                unresolvedExplicitDefinitionSource(),
+                "ReductionStoreDefinition class values remain unresolved "
+                        + "after all processing rounds");
+    }
+
+    @Test
+    void rejectsInvalidExplicitDefinitionAnchor(
+            @TempDir Path temporaryDirectory) throws Exception {
+        assertRejected(
+                temporaryDirectory,
+                "explicit.InvalidDefinition",
+                invalidDefinitionAnchorSource(),
+                "must annotate a top-level, non-generic interface");
+    }
+
     private static void assertRejected(
             Path temporaryDirectory,
             String sourceName,
@@ -458,5 +583,158 @@ class ReductionProcessorValidationTest {
                 "    return (state, row) -> state + 1L;",
                 "  }",
                 "}");
+    }
+
+    private static String emptyExplicitDefinitionSource() {
+        return lines(
+                "package explicit;",
+                "import io.github.jutil.reductionstore.ReductionStoreDefinition;",
+                "final class Row {}",
+                "@ReductionStoreDefinition(input = Row.class, reductions = {})",
+                "interface Definition {}");
+    }
+
+    private static String duplicateExplicitReductionSource() {
+        return lines(
+                "package explicit;",
+                "import io.github.jutil.reductionstore.*;",
+                "import java.util.function.LongSupplier;",
+                "final class Row {}",
+                "final class Count implements LongReduction<Row> {",
+                "  public LongSupplier supplier() { return () -> 0L; }",
+                "  public LongReducer<Row> reducer() {",
+                "    return (state, row) -> state + 1L;",
+                "  }",
+                "}",
+                "@ReductionStoreDefinition(",
+                "    input = Row.class, reductions = {Count.class, Count.class})",
+                "interface Definition {}");
+    }
+
+    private static String mismatchedExplicitInputSource() {
+        return lines(
+                "package explicit;",
+                "import io.github.jutil.reductionstore.*;",
+                "import java.util.function.LongSupplier;",
+                "final class Row {}",
+                "final class Other {}",
+                "final class Count implements LongReduction<Other> {",
+                "  public LongSupplier supplier() { return () -> 0L; }",
+                "  public LongReducer<Other> reducer() {",
+                "    return (state, row) -> state + 1L;",
+                "  }",
+                "}",
+                "@ReductionStoreDefinition(input = Row.class,",
+                "    reductions = Count.class)",
+                "interface Definition {}");
+    }
+
+    private static String explicitNonReductionSource() {
+        return lines(
+                "package explicit;",
+                "import io.github.jutil.reductionstore.ReductionStoreDefinition;",
+                "final class Row {}",
+                "final class NotAReduction {}",
+                "@ReductionStoreDefinition(input = Row.class,",
+                "    reductions = NotAReduction.class)",
+                "interface Definition {}");
+    }
+
+    private static String inaccessibleExplicitImplementationDefinition() {
+        return lines(
+                "package composition;",
+                "import io.github.jutil.reductionstore.ReductionStoreDefinition;",
+                "import model.Row;",
+                "@ReductionStoreDefinition(input = Row.class,",
+                "    reductions = implementation.Count.class)",
+                "interface Definition {}");
+    }
+
+    private static String inaccessibleExplicitStateDefinition() {
+        return lines(
+                "package composition;",
+                "import io.github.jutil.reductionstore.ReductionStoreDefinition;",
+                "import implementation.Count;",
+                "import model.Row;",
+                "@ReductionStoreDefinition(input = Row.class,",
+                "    reductions = Count.class)",
+                "interface Definition {}");
+    }
+
+    private static String explicitNameCollisionSource() {
+        return lines(
+                "package collision;",
+                "import io.github.jutil.reductionstore.*;",
+                "import java.util.function.LongSupplier;",
+                "final class Row {}",
+                "final class Count implements LongReduction<Row> {",
+                "  public LongSupplier supplier() { return () -> 0L; }",
+                "  public LongReducer<Row> reducer() {",
+                "    return (state, row) -> state + 1L;",
+                "  }",
+                "}",
+                "final class RowReductionStore {}",
+                "@ReductionStoreDefinition(input = Row.class,",
+                "    reductions = Count.class)",
+                "interface Definition {}");
+    }
+
+    private static String firstDuplicateTargetInput() {
+        return lines("package first;", "public final class Row {}");
+    }
+
+    private static String secondDuplicateTargetInput() {
+        return lines("package second;", "public final class Row {}");
+    }
+
+    private static String firstDuplicateTargetReduction() {
+        return publicCountSource("first");
+    }
+
+    private static String secondDuplicateTargetReduction() {
+        return publicCountSource("second");
+    }
+
+    private static String publicCountSource(String packageName) {
+        return lines(
+                "package " + packageName + ";",
+                "import io.github.jutil.reductionstore.*;",
+                "import java.util.function.LongSupplier;",
+                "public final class Count implements LongReduction<Row> {",
+                "  public LongSupplier supplier() { return () -> 0L; }",
+                "  public LongReducer<Row> reducer() {",
+                "    return (state, row) -> state + 1L;",
+                "  }",
+                "}");
+    }
+
+    private static String duplicateTargetDefinitions() {
+        return lines(
+                "package composition;",
+                "import io.github.jutil.reductionstore.ReductionStoreDefinition;",
+                "@ReductionStoreDefinition(input = first.Row.class,",
+                "    reductions = first.Count.class)",
+                "interface FirstDefinition {}",
+                "@ReductionStoreDefinition(input = second.Row.class,",
+                "    reductions = second.Count.class)",
+                "interface SecondDefinition {}");
+    }
+
+    private static String unresolvedExplicitDefinitionSource() {
+        return lines(
+                "package unresolved;",
+                "import io.github.jutil.reductionstore.ReductionStoreDefinition;",
+                "@ReductionStoreDefinition(input = MissingRow.class,",
+                "    reductions = MissingReduction.class)",
+                "interface Definition {}");
+    }
+
+    private static String invalidDefinitionAnchorSource() {
+        return lines(
+                "package explicit;",
+                "import io.github.jutil.reductionstore.ReductionStoreDefinition;",
+                "@ReductionStoreDefinition(input = String.class,",
+                "    reductions = String.class)",
+                "public final class InvalidDefinition<T> {}");
     }
 }

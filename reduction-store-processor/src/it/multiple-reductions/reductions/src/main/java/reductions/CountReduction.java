@@ -1,14 +1,15 @@
-package example;
+package reductions;
 
 import io.github.jutil.reductionstore.LongReducer;
 import io.github.jutil.reductionstore.LongReduction;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.function.LongSupplier;
+import model.Row;
 
-public final class Count implements LongReduction<Row> {
+public final class CountReduction implements LongReduction<Row> {
 
-    static final List<Row> received = new ArrayList<Row>();
+    public static final List<Row> received = new ArrayList<Row>();
 
     @Override
     public LongSupplier supplier() {

@@ -19,6 +19,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.stream.Stream;
+import javax.annotation.processing.Processor;
 import javax.tools.Diagnostic;
 import javax.tools.DiagnosticCollector;
 import javax.tools.JavaCompiler;
@@ -54,6 +55,21 @@ final class CompilerTestSupport {
     static Compilation compile(
             Path workingDirectory, Map<String, String> sources)
             throws IOException {
+        return compile(workingDirectory, sources, null);
+    }
+
+    static Compilation compileWithProcessors(
+            Path workingDirectory,
+            Map<String, String> sources,
+            Processor... processors) throws IOException {
+        return compile(
+                workingDirectory, sources, Arrays.asList(processors));
+    }
+
+    private static Compilation compile(
+            Path workingDirectory,
+            Map<String, String> sources,
+            List<Processor> processors) throws IOException {
         Path sourceDirectory = workingDirectory.resolve("sources");
         Path classDirectory = workingDirectory.resolve("classes");
         Path generatedSourceDirectory = workingDirectory.resolve("generated");
@@ -100,13 +116,17 @@ final class CompilerTestSupport {
             }
             Iterable<? extends JavaFileObject> compilationUnits =
                     fileManager.getJavaFileObjectsFromFiles(sourceFiles);
-            succeeded = Boolean.TRUE.equals(compiler.getTask(
+            JavaCompiler.CompilationTask task = compiler.getTask(
                     null,
                     fileManager,
                     diagnostics,
                     options,
                     null,
-                    compilationUnits).call());
+                    compilationUnits);
+            if (processors != null) {
+                task.setProcessors(processors);
+            }
+            succeeded = Boolean.TRUE.equals(task.call());
         }
         return new Compilation(
                 succeeded,

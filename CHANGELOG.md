@@ -17,3 +17,6 @@ This file records user-visible changes to Reduction Store.
 - Isolated Maven consumer verification, Java 8/current-JDK CI, and Maven
   Central release rehearsal configuration for the runtime and processor
   artifacts.
+- Optional `ReductionStoreDefinition` composition for selecting accessible
+  reductions from other modules or JARs without changing annotation-free
+  discovery.

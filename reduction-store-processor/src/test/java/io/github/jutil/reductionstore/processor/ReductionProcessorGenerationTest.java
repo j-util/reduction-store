@@ -1,6 +1,7 @@
 package io.github.jutil.reductionstore.processor;
 
 import static io.github.jutil.reductionstore.processor.CompilerTestSupport.compile;
+import static io.github.jutil.reductionstore.processor.CompilerTestSupport.compileWithProcessors;
 import static io.github.jutil.reductionstore.processor.CompilerTestSupport.lines;
 import static io.github.jutil.reductionstore.processor.CompilerTestSupport.sources;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -17,6 +18,7 @@ import io.github.jutil.reductionstore.LongReducer;
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
+import java.io.Writer;
 import java.lang.reflect.Field;
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
@@ -29,6 +31,12 @@ import java.util.HashMap;
 import java.util.Map;
 import java.util.function.BiFunction;
 import java.util.function.Supplier;
+import javax.annotation.processing.AbstractProcessor;
+import javax.annotation.processing.RoundEnvironment;
+import javax.annotation.processing.SupportedAnnotationTypes;
+import javax.lang.model.SourceVersion;
+import javax.lang.model.element.TypeElement;
+import javax.tools.JavaFileObject;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -263,6 +271,82 @@ class ReductionProcessorGenerationTest {
 
         assertTrue(compilation.succeeded(), compilation.diagnostics());
         assertNotNull(compilation.generatedSource("zero.EventReductionStore"));
+    }
+
+    @Test
+    void explicitDefinitionGeneratesInItsPackageWithSelectedKindsAndOrder(
+            @TempDir Path temporaryDirectory) throws Exception {
+        CompilerTestSupport.Compilation compilation = compile(
+                temporaryDirectory,
+                sources(
+                        "model.Row", explicitInputSource(),
+                        "reductions.Count", explicitCountSource(),
+                        "reductions.Values", explicitValuesSource(),
+                        "reductions.Unlisted", explicitUnlistedSource(),
+                        "composition.RowStoreDefinition",
+                        explicitDefinitionSource()));
+
+        assertTrue(compilation.succeeded(), compilation.diagnostics());
+        String generated = compilation.generatedSource(
+                "composition.RowReductionStore");
+        assertTrue(generated.contains("new reductions.Count()"), generated);
+        assertTrue(generated.contains("new reductions.Values()"), generated);
+        assertFalse(generated.contains("reductions.Unlisted"), generated);
+        assertTrue(
+                generated.indexOf("new reductions.Count()")
+                        < generated.indexOf("new reductions.Values()"),
+                "annotation order changed qualified-name execution order");
+
+        try (URLClassLoader loader = compilation.newClassLoader()) {
+            Class<?> rowType = loader.loadClass("model.Row");
+            Class<?> storeType = loader.loadClass(
+                    "composition.RowReductionStore");
+            Object store = storeType.getConstructor().newInstance();
+            Method add = storeType.getMethod("add", rowType);
+            add.invoke(store, rowType.getConstructor(long.class)
+                    .newInstance(5L));
+            add.invoke(store, rowType.getConstructor(long.class)
+                    .newInstance(7L));
+
+            assertEquals(2L, storeType.getMethod("count").invoke(store));
+            assertEquals(
+                    java.util.Arrays.asList(5L, 7L),
+                    storeType.getMethod("values").invoke(store));
+            assertEquals(
+                    0,
+                    staticInt(loader, "reductions.Unlisted", "constructions"));
+        }
+    }
+
+    @Test
+    void explicitDefinitionSuppressesAutomaticStoreWithTheSameTarget(
+            @TempDir Path temporaryDirectory) throws Exception {
+        CompilerTestSupport.Compilation compilation = compile(
+                temporaryDirectory,
+                sources("authority.Row", authoritativeDefinitionSource()));
+
+        assertTrue(compilation.succeeded(), compilation.diagnostics());
+        assertEquals(1, compilation.generatedJavaFiles().size());
+        String generated = compilation.generatedSource(
+                "authority.RowReductionStore");
+        assertTrue(generated.contains("new authority.Count()"), generated);
+        assertFalse(generated.contains("authority.Unlisted"), generated);
+    }
+
+    @Test
+    void retriesExplicitTypesGeneratedInALaterRound(
+            @TempDir Path temporaryDirectory) throws Exception {
+        CompilerTestSupport.Compilation compilation = compileWithProcessors(
+                temporaryDirectory,
+                sources(
+                        "deferred.RowStoreDefinition",
+                        deferredDefinitionSource()),
+                new DeferredTypesProcessor(),
+                new ReductionProcessor());
+
+        assertTrue(compilation.succeeded(), compilation.diagnostics());
+        assertNotNull(compilation.generatedSource(
+                "deferred.GeneratedRowReductionStore"));
     }
 
     private static void assertPrimitiveSourceShape(String generated) {
@@ -638,5 +722,163 @@ class ReductionProcessorGenerationTest {
                 "    return (state, event) -> state + 1L;",
                 "  }",
                 "}");
+    }
+
+    private static String explicitInputSource() {
+        return lines(
+                "package model;",
+                "public final class Row {",
+                "  private final long value;",
+                "  public Row(long value) { this.value = value; }",
+                "  public long value() { return value; }",
+                "}");
+    }
+
+    private static String explicitCountSource() {
+        return lines(
+                "package reductions;",
+                "import io.github.jutil.reductionstore.*;",
+                "import java.util.function.LongSupplier;",
+                "import model.Row;",
+                "public final class Count implements LongReduction<Row> {",
+                "  public LongSupplier supplier() { return () -> 0L; }",
+                "  public LongReducer<Row> reducer() {",
+                "    return (state, row) -> state + 1L;",
+                "  }",
+                "}");
+    }
+
+    private static String explicitValuesSource() {
+        return lines(
+                "package reductions;",
+                "import io.github.jutil.reductionstore.Reduction;",
+                "import java.util.*;",
+                "import java.util.function.*;",
+                "import model.Row;",
+                "public final class Values",
+                "    implements Reduction<Row, List<Long>> {",
+                "  public Supplier<List<Long>> supplier() {",
+                "    return ArrayList<Long>::new;",
+                "  }",
+                "  public BiFunction<List<Long>, Row, List<Long>> reducer() {",
+                "    return (state, row) -> { state.add(row.value()); return state; };",
+                "  }",
+                "}");
+    }
+
+    private static String explicitUnlistedSource() {
+        return lines(
+                "package reductions;",
+                "import io.github.jutil.reductionstore.*;",
+                "import java.util.function.IntSupplier;",
+                "import model.Row;",
+                "public final class Unlisted implements IntReduction<Row> {",
+                "  static int constructions;",
+                "  public Unlisted() { constructions++; }",
+                "  public IntSupplier supplier() { return () -> 0; }",
+                "  public IntReducer<Row> reducer() {",
+                "    return (state, row) -> state + 1;",
+                "  }",
+                "}");
+    }
+
+    private static String explicitDefinitionSource() {
+        return lines(
+                "package composition;",
+                "import io.github.jutil.reductionstore.ReductionStoreDefinition;",
+                "import model.Row;",
+                "import reductions.*;",
+                "@ReductionStoreDefinition(",
+                "    input = Row.class,",
+                "    reductions = {Values.class, Count.class})",
+                "public interface RowStoreDefinition {} ");
+    }
+
+    private static String authoritativeDefinitionSource() {
+        return lines(
+                "package authority;",
+                "import io.github.jutil.reductionstore.*;",
+                "import java.util.function.LongSupplier;",
+                "public final class Row {}",
+                "final class Count implements LongReduction<Row> {",
+                "  public LongSupplier supplier() { return () -> 0L; }",
+                "  public LongReducer<Row> reducer() {",
+                "    return (state, row) -> state + 1L;",
+                "  }",
+                "}",
+                "final class Unlisted implements LongReduction<Row> {",
+                "  public LongSupplier supplier() { return () -> 0L; }",
+                "  public LongReducer<Row> reducer() {",
+                "    return (state, row) -> state + 10L;",
+                "  }",
+                "}",
+                "@ReductionStoreDefinition(",
+                "    input = Row.class, reductions = Count.class)",
+                "interface Definition {}");
+    }
+
+    private static String deferredDefinitionSource() {
+        return lines(
+                "package deferred;",
+                "import io.github.jutil.reductionstore.ReductionStoreDefinition;",
+                "@ReductionStoreDefinition(",
+                "    input = GeneratedRow.class,",
+                "    reductions = GeneratedCount.class)",
+                "public interface RowStoreDefinition {}");
+    }
+
+    @SupportedAnnotationTypes("*")
+    private static final class DeferredTypesProcessor
+            extends AbstractProcessor {
+        private boolean generated;
+
+        @Override
+        public SourceVersion getSupportedSourceVersion() {
+            return SourceVersion.latestSupported();
+        }
+
+        @Override
+        public boolean process(
+                java.util.Set<? extends TypeElement> annotations,
+                RoundEnvironment roundEnvironment) {
+            if (generated || roundEnvironment.processingOver()) {
+                return false;
+            }
+            generated = true;
+            try {
+                writeSource(
+                        "deferred.GeneratedRow",
+                        lines(
+                                "package deferred;",
+                                "public final class GeneratedRow {}"));
+                writeSource(
+                        "deferred.GeneratedCount",
+                        lines(
+                                "package deferred;",
+                                "import io.github.jutil.reductionstore.*;",
+                                "import java.util.function.LongSupplier;",
+                                "public final class GeneratedCount",
+                                "    implements LongReduction<GeneratedRow> {",
+                                "  public LongSupplier supplier() {",
+                                "    return () -> 0L;",
+                                "  }",
+                                "  public LongReducer<GeneratedRow> reducer() {",
+                                "    return (state, row) -> state + 1L;",
+                                "  }",
+                                "}"));
+            } catch (IOException exception) {
+                throw new IllegalStateException(exception);
+            }
+            return false;
+        }
+
+        private void writeSource(String name, String source)
+                throws IOException {
+            JavaFileObject file = processingEnv.getFiler()
+                    .createSourceFile(name);
+            try (Writer writer = file.openWriter()) {
+                writer.write(source);
+            }
+        }
     }
 }

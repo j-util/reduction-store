@@ -118,6 +118,14 @@
                     <cloneProjectsTo>${project.build.directory}/it</cloneProjectsTo>
                     <localRepositoryPath>${project.build.directory}/it-repository</localRepositoryPath>
                     <scope>test</scope>
+                    <extraArtifacts>
+                        <extraArtifact>org.apache.maven.plugins:maven-clean-plugin:3.5.0:maven-plugin</extraArtifact>
+                        <extraArtifact>org.apache.maven.plugins:maven-resources-plugin:3.5.0:maven-plugin</extraArtifact>
+                        <extraArtifact>org.apache.maven.plugins:maven-compiler-plugin:3.15.0:maven-plugin</extraArtifact>
+                        <extraArtifact>org.apache.maven.plugins:maven-surefire-plugin:3.5.5:maven-plugin</extraArtifact>
+                        <extraArtifact>org.apache.maven.plugins:maven-jar-plugin:3.5.1:maven-plugin</extraArtifact>
+                        <extraArtifact>org.codehaus.mojo:exec-maven-plugin:3.6.3:maven-plugin</extraArtifact>
+                    </extraArtifacts>
                     <goals>
                         <goal>clean</goal>
                         <goal>verify</goal>
